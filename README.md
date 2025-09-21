@@ -1,59 +1,422 @@
-<header>
+#!/bin/bash
 
-# Hello GitHub Actions
+# ========================================
+# AI自動化接案平台 - 完整部署腳本
+# ========================================
 
-_Create and run a GitHub Actions workflow._
+echo "🚀 開始建置AI接案平台..."
 
-</header>
+# 第一段：建置命令 (Infrastructure Setup)
+setup_infrastructure() {
+    echo "📦 第一階段：基礎架構建置"
+    
+    # Docker環境準備
+    echo "安裝Docker環境..."
+    sudo apt update
+    sudo apt install -y docker.io docker-compose
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    
+    # 建立專案結構
+    echo "建立專案目錄結構..."
+    mkdir -p ai_platform/{backend,frontend,ai_service,database,nginx,scripts}
+    mkdir -p ai_platform/backend/{api,models,services,utils}
+    mkdir -p ai_platform/frontend/{src,public,components}
+    mkdir -p ai_platform/ai_service/{matching,evaluation,automation}
+    
+    # 建立Docker網路
+    docker network create ai_platform_network
+    
+    echo "✅ 基礎架構建置完成"
+}
 
-## Step 1: Create a workflow file
+# 第二段：輸入目錄 (Directory Configuration)
+setup_directories() {
+    echo "📁 第二階段：目錄配置與環境設定"
+    
+    # 進入專案根目錄
+    cd ai_platform
+    
+    # 建立環境配置文件
+    cat > .env << EOF
+# 資料庫配置
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=ai_platform
+DB_USER=platform_user
+DB_PASSWORD=secure_password_2024
 
-_Welcome to "Hello GitHub Actions"! :wave:_
+# Redis配置
+REDIS_HOST=localhost
+REDIS_PORT=6379
 
-**What is _GitHub Actions_?**: GitHub Actions is a flexible way to automate nearly every aspect of your team's software workflow. You can automate testing, continuously deploy, review code, manage issues and pull requests, and much more. The best part, these workflows are stored as code in your repository and easily shared and reused across teams. To learn more, check out these resources:
+# AI服務配置
+AI_MODEL_PATH=./models
+OPENAI_API_KEY=your_openai_key_here
+MATCHING_ALGORITHM=enhanced_ml
 
-- The GitHub Actions feature page, see [GitHub Actions](https://github.com/features/actions).
-- The "GitHub Actions" user documentation, see [GitHub Actions](https://docs.github.com/actions).
+# 平台配置
+PLATFORM_NAME=AI接案平台
+COMMISSION_RATE=0.15
+PAYMENT_GATEWAY=ecpay
 
-**What is a _workflow_?**: A workflow is a configurable automated process that will run one or more jobs. Workflows are defined in special files in the `.github/workflows` directory and they execute based on your chosen event. For this exercise, we'll use a `pull_request` event.
+# 安全設定
+JWT_SECRET=your_jwt_secret_here
+SESSION_SECRET=your_session_secret_here
 
-- To read more about workflows, jobs, and events, see "[Understanding GitHub Actions](https://docs.github.com/en/actions/learn-github-actions/understanding-github-actions)".
-- If you want to learn more about the `pull_request` event before using it, see "[pull_request](https://docs.github.com/en/developers/webhooks-and-events/webhooks/webhook-events-and-payloads#pull_request)".
+# 第三方服務
+SMTP_HOST=smtp.gmail.com
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+EOF
 
-To get you started, we ran an Actions workflow in your new repository that, among other things, created a branch for you to work in, called `welcome-workflow`.
+    # 建立Docker Compose配置
+    cat > docker-compose.yml << 'EOF'
+version: '3.8'
 
-### :keyboard: Activity: Create a workflow file
+services:
+  # PostgreSQL資料庫
+  postgres:
+    image: postgres:15
+    container_name: ai_platform_db
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - ai_platform_network
 
-1. Open a new browser tab, and navigate to this same repository. Then, work on the steps in your second tab while you read the instructions in this tab.
-1. Create a pull request. This will contain all of the changes you'll make throughout this part of the course.
+  # Redis緩存
+  redis:
+    image: redis:7-alpine
+    container_name: ai_platform_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - ai_platform_network
 
-   Click the **Pull Requests** tab, click **New pull request**, set `base: main` and `compare:welcome-workflow`, click **Create pull request**, then click **Create pull request** again.
+  # 後端API服務
+  backend:
+    build: ./backend
+    container_name: ai_platform_backend
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - ai_platform_network
+    volumes:
+      - ./uploads:/app/uploads
 
-1. Navigate to the **Code** tab.
-1. From the **main** branch dropdown, click on the **welcome-workflow** branch.
-1. Navigate to the `.github/workflows/` folder, then select **Add file** and click on **Create new file**.
-1. In the **Name your file** field, enter `welcome.yml`.
-1. Add the following content to the `welcome.yml` file:
+  # AI匹配服務
+  ai_service:
+    build: ./ai_service
+    container_name: ai_platform_ai
+    environment:
+      - PYTHON_ENV=production
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+    networks:
+      - ai_platform_network
+    volumes:
+      - ./models:/app/models
 
-   ```yaml copy
-   name: Post welcome comment
-   on:
-     pull_request:
-       types: [opened]
-   permissions:
-     pull-requests: write
-   ```
+  # 前端應用
+  frontend:
+    build: ./frontend
+    container_name: ai_platform_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - ai_platform_network
 
-1. To commit your changes, click **Commit changes**.
-1. Type a commit message, select **Commit directly to the welcome-workflow branch** and click **Commit changes**.
-1. Wait about 20 seconds, then refresh this page (the one you're following instructions from). A separate Actions workflow in the repository (not the workflow you created) will run and will automatically replace the contents of this README file with instructions for the next step.
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: ai_platform_nginx
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - ai_platform_network
 
-<footer>
+volumes:
+  postgres_data:
 
----
+networks:
+  ai_platform_network:
+    driver: bridge
+EOF
 
-Get help: [Post in our discussion board](https://github.com/orgs/skills/discussions/categories/hello-github-actions) &bull; [Review the GitHub status page](https://www.githubstatus.com/)
+    echo "✅ 目錄配置完成"
+}
 
-&copy; 2023 GitHub &bull; [Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/code_of_conduct.md) &bull; [MIT License](https://gh.io/mit)
+# 第三段：安裝命令 (Application Installation)
+install_applications() {
+    echo "🔧 第三階段：應用程式安裝與配置"
+    
+    # 建立資料庫初始化腳本
+    cat > database/init.sql << 'EOF'
+-- AI接案平台資料庫結構
 
-</footer>
+-- 用戶表
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    user_type VARCHAR(20) NOT NULL, -- 'client' or 'freelancer'
+    profile_data JSONB,
+    skill_tags TEXT[],
+    rating DECIMAL(3,2) DEFAULT 0.00,
+    total_earnings DECIMAL(10,2) DEFAULT 0.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 任務表
+CREATE TABLE tasks (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER REFERENCES users(id),
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    requirements JSONB,
+    budget_min DECIMAL(10,2),
+    budget_max DECIMAL(10,2),
+    deadline TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'open', -- 'open', 'in_progress', 'completed', 'cancelled'
+    ai_complexity_score INTEGER,
+    required_skills TEXT[],
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 競標表
+CREATE TABLE bids (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES tasks(id),
+    freelancer_id INTEGER REFERENCES users(id),
+    bid_amount DECIMAL(10,2),
+    proposal TEXT,
+    estimated_hours INTEGER,
+    ai_match_score DECIMAL(5,4),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 交易記錄表
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES tasks(id),
+    client_id INTEGER REFERENCES users(id),
+    freelancer_id INTEGER REFERENCES users(id),
+    amount DECIMAL(10,2),
+    commission DECIMAL(10,2),
+    status VARCHAR(20) DEFAULT 'pending',
+    payment_method VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- AI匹配記錄表
+CREATE TABLE ai_matches (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES tasks(id),
+    freelancer_id INTEGER REFERENCES users(id),
+    match_score DECIMAL(5,4),
+    match_factors JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 建立索引
+CREATE INDEX idx_users_type ON users(user_type);
+CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_bids_task ON bids(task_id);
+CREATE INDEX idx_transactions_status ON transactions(status);
+EOF
+
+    # 建立後端API Dockerfile
+    cat > backend/Dockerfile << 'EOF'
+FROM node:18-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
+EOF
+
+    # 建立AI服務Dockerfile
+    cat > ai_service/Dockerfile << 'EOF'
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
+EOF
+
+    # 建立前端Dockerfile
+    cat > frontend/Dockerfile << 'EOF'
+FROM node:18-alpine as builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+EOF
+
+    # 啟動服務
+    echo "🚀 啟動所有服務..."
+    docker-compose up -d
+
+    # 等待服務啟動
+    echo "⏳ 等待服務初始化..."
+    sleep 30
+
+    # 檢查服務狀態
+    echo "🔍 檢查服務狀態..."
+    docker-compose ps
+
+    echo "✅ 所有服務安裝完成！"
+}
+
+# 額外的管理腳本
+create_management_scripts() {
+    echo "📋 建立管理腳本..."
+    
+    # 建立AI模型訓練腳本
+    cat > scripts/train_matching_model.py << 'EOF'
+#!/usr/bin/env python3
+"""
+AI配對模型訓練腳本
+基於歷史配對成功率訓練機器學習模型
+"""
+
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import joblib
+
+def train_matching_model():
+    """訓練AI配對模型"""
+    print("🤖 開始訓練AI配對模型...")
+    
+    # 這裡會從資料庫載入歷史資料
+    # 特徵包括：技能匹配度、價格合理性、完成時間預估等
+    
+    # 模擬數據（實際使用時從資料庫獲取）
+    features = ['skill_match', 'price_ratio', 'time_estimation', 'rating_diff']
+    
+    # 訓練模型
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    
+    # 儲存模型
+    joblib.dump(model, '../models/matching_model.pkl')
+    print("✅ AI配對模型訓練完成")
+
+if __name__ == "__main__":
+    train_matching_model()
+EOF
+
+    # 建立系統監控腳本
+    cat > scripts/monitor_system.sh << 'EOF'
+#!/bin/bash
+
+echo "📊 AI接案平台系統監控報告"
+echo "=================================="
+
+# 檢查Docker容器狀態
+echo "🐳 Docker容器狀態："
+docker-compose ps
+
+# 檢查資料庫連接
+echo -e "\n💾 資料庫狀態："
+docker exec ai_platform_db pg_isready
+
+# 檢查Redis狀態  
+echo -e "\n🔄 Redis狀態："
+docker exec ai_platform_redis redis-cli ping
+
+# 檢查API健康狀態
+echo -e "\n🔌 API健康檢查："
+curl -s http://localhost:3000/health || echo "API無法訪問"
+
+# 檢查AI服務狀態
+echo -e "\n🤖 AI服務狀態："
+curl -s http://localhost:5000/status || echo "AI服務無法訪問"
+
+echo -e "\n✅ 監控報告完成"
+EOF
+
+    chmod +x scripts/*.sh scripts/*.py
+    echo "✅ 管理腳本建立完成"
+}
+
+# 主執行流程
+main() {
+    echo "🎯 AI接案平台自動化部署開始"
+    
+    setup_infrastructure
+    setup_directories  
+    install_applications
+    create_management_scripts
+    
+    echo ""
+    echo "🎉 部署完成！"
+    echo "=================================="
+    echo "📱 前端網址: http://localhost"
+    echo "🔌 API端點: http://localhost:3000"
+    echo "🤖 AI服務: http://localhost:5000"
+    echo "💾 資料庫: localhost:5432"
+    echo ""
+    echo "🛠️ 管理命令："
+    echo "  監控系統: ./scripts/monitor_system.sh"
+    echo "  訓練AI: python scripts/train_matching_model.py"
+    echo "  重啟服務: docker-compose restart"
+    echo ""
+    echo "📋 下一步建議："
+    echo "  1. 設定SSL憑證"
+    echo "  2. 配置支付網關"
+    echo "  3. 訓練AI配對模型"
+    echo "  4. 進行使用者測試"
+}
+
+# 執行主函數
+main "$@"
